@@ -1,0 +1,22 @@
+# Render deployment settings.
+# Render reads this file automatically - you should not need to edit it.
+
+services:
+  - type: web
+    name: dip-screener
+    runtime: python
+    plan: free
+
+    buildCommand: pip install -r requirements.txt
+
+    # One worker only. More workers would mean several copies of the
+    # refresh loop all fetching prices at the same time.
+    startCommand: gunicorn --workers 1 --threads 4 --timeout 120 --bind 0.0.0.0:$PORT wsgi:app
+
+    # Render pings this to confirm the app started. It answers instantly
+    # instead of waiting for a price scan to finish.
+    healthCheckPath: /healthz
+
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"

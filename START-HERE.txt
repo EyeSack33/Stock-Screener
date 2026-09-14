@@ -1,0 +1,109 @@
+DIP SCREENER - START HERE
+=========================
+
+There are TWO ways to run this. Pick one.
+
+  A) ONLINE  - works from any phone or computer, anywhere.
+               Free, about 15 minutes, no Terminal needed.
+               >>> Open DEPLOY.md and follow it. <<<
+               This is probably what you want.
+
+  B) LOCAL   - runs on this computer only. Faster, no waiting
+               for it to wake up, but the page only works while
+               this computer is switched on and awake.
+               Instructions below.
+
+You can do both. They do not interfere with each other.
+
+
+===========================================
+  OPTION B - RUNNING IT ON THIS COMPUTER
+===========================================
+
+STEP 1. Make sure Python is installed.
+        Get it from https://www.python.org/downloads/
+        On Windows, TICK "Add Python to PATH" during setup.
+        (Most Macs already have it.)
+
+STEP 2. Start it.
+
+  WINDOWS
+    Double-click  START-WINDOWS.bat
+    Done.
+
+  MAC
+    Downloaded files lose permission to run, so there is one
+    setup line to do ONCE. Open Terminal (Cmd+Space, type
+    Terminal), then type this, including the trailing space:
+
+        chmod +x 
+
+    Now drag START-MAC.command from Finder onto the Terminal
+    window and press Enter. Nothing will appear to happen -
+    that is correct.
+
+    From then on, just double-click START-MAC.command.
+    The very first double-click shows a security warning:
+    right-click the file, choose Open, then Open again.
+
+Your browser opens on its own. The first run takes a couple of
+minutes while it installs Flask and yfinance.
+
+The page says "Scanning the market" for up to a minute before
+the stocks appear. That is normal.
+
+
+VIEWING IT ON YOUR PHONE
+------------------------
+While it is running, the window prints two addresses.
+Use the second one (like http://192.168.1.42:8000) on your
+phone, with the phone on the same Wi-Fi.
+
+
+CHANGING WHAT IT SCANS
+----------------------
+Open config.yaml in any text editor. Every setting has a
+comment explaining it. The three you will actually want:
+
+  limit                how many stocks to scan
+                       200 by default, 0 = all 503
+
+  buy_threshold        minimum score to appear in the list
+                       60 by default, lower it to see more
+
+  dip_full_scale_pct   the drop size that scores best
+                       5.0 means "a 5% drop is ideal"
+
+Save the file, then stop and restart for changes to apply.
+
+
+TO STOP IT
+----------
+Close the window, or press Control+C inside it.
+
+
+IF SOMETHING GOES WRONG
+-----------------------
+"Python is not installed"
+    Install it, and on Windows make sure you ticked
+    "Add Python to PATH".
+
+Window flashes and closes instantly (Windows)
+    Right-click START-WINDOWS.bat, choose Edit, and check the
+    file is not empty. Otherwise re-download it.
+
+Page loads but stays empty
+    Look at the window for batch failures. That means Yahoo is
+    limiting you. Lower `limit` in config.yaml to 100.
+
+"Address already in use"
+    Something else is using port 8000. Change `port: 8001`
+    in config.yaml.
+
+Want to test without the internet?
+    In config.yaml change  provider: "yfinance"
+                       to  provider: "mock"
+    It runs instantly on fake data. Change it back afterwards.
+
+
+This is a screening tool, not investment advice.
