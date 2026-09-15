@@ -28,7 +28,7 @@ universe:
 
   file_path: "watchlist.txt"
   exclude: []                # tickers to always ignore
-  limit: 200                 # 0 = scan everything. Lower = faster startup.
+  limit: 5                   # 0 = scan everything. Lower = faster startup.
 
 schedule:
   refresh_minutes: 15        # how often to re-check while the app is awake
