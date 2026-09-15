@@ -8,7 +8,7 @@
 data_source:
   # yfinance = free Yahoo data, no key required
   # mock     = fake data for testing offline
-  provider: "yfinance"
+  provider: "mock"
   batch_size: 100            # tickers per request to Yahoo
   batch_pause_seconds: 1     # brief wait between batches
 
