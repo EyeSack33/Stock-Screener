@@ -20,3 +20,13 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.12"
+      # Without this, Python holds log lines in a buffer and Render's
+      # Logs tab stays empty even though the app is printing.
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      # Render prompts you for these and stores them securely.
+      # They never appear in your GitHub repository.
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_API_SECRET
+        sync: false

@@ -16,14 +16,21 @@ never has to care where the numbers came from:
 The last item in "history" is always today's bar, so history[-1] equals
 "price" and history[-2] equals "prev_close".
 
-Two providers: "yfinance" for real Yahoo prices, and "mock" for testing
-with no internet. Adding another source later means adding one class
-here and nothing else.
+Three providers:
+  yfinance - free Yahoo prices, no key, but Yahoo blocks hosted servers
+  alpaca   - free API key, works from anywhere including Render
+  mock     - fake data for testing with no internet
+
+Adding another source means adding one class here and nothing else.
 """
 
+import json
 import random
 import time
-from datetime import datetime
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime, timedelta
 
 
 class DataFeedError(Exception):
@@ -42,7 +49,7 @@ class MockProvider:
         # between runs, which makes the 15-minute loop easy to watch.
         random.seed(datetime.now().hour)
 
-    def fetch(self, tickers, days_needed):
+    def fetch(self, tickers, days_needed, progress_cb=None):
         results = []
         for t in tickers:
             base = random.uniform(40, 400)
@@ -102,11 +109,14 @@ class YFinanceProvider:
                 return label
         return "max"
 
-    def fetch(self, tickers, days_needed):
+    def fetch(self, tickers, days_needed, progress_cb=None):
         """
         Fetch in batches. Asking Yahoo for 500 tickers in one request
         tends to time out or get throttled, so we send them in groups
         and stitch the results together.
+
+        progress_cb, if given, is called with a short status string so
+        the web page can show what is happening.
         """
         batch_size = self.config["data_source"].get("batch_size", 100)
         pause = self.config["data_source"].get("batch_pause_seconds", 1)
@@ -117,11 +127,16 @@ class YFinanceProvider:
                    for i in range(0, len(tickers), batch_size)]
 
         for n, batch in enumerate(batches, start=1):
-            if len(batches) > 1:
-                print(f"  Fetching batch {n} of {len(batches)} "
-                      f"({len(batch)} tickers)...")
+            note = f"Fetching batch {n} of {len(batches)}"
+            print(f"  {note} ({len(batch)} tickers)...")
+            if progress_cb:
+                progress_cb(f"{note} - {len(results)} stocks so far")
 
+            started = time.time()
             got, missed = self._fetch_batch(batch, days_needed)
+            took = time.time() - started
+            print(f"    got {len(got)}, missed {len(missed)} "
+                  f"in {took:.1f}s")
             results.extend(got)
             skipped.extend(missed)
 
@@ -193,9 +208,172 @@ class YFinanceProvider:
         return results, skipped
 
 
+# ----------------------------------------------------------------------
+# ALPACA - a proper API with a key. Works from hosted servers, which is
+# why it exists here: Yahoo blocks data centres, Alpaca does not.
+# ----------------------------------------------------------------------
+class AlpacaProvider:
+    """
+    Free Alpaca account, no funding needed. Two things make it a good fit:
+    one request can carry a hundred symbols, and the free plan allows 200
+    requests a minute.
+
+    The free plan's prices come from the IEX exchange rather than every
+    exchange combined. For big S&P 500 companies the difference is small,
+    usually a cent or two. It is the trade for free real-time data.
+    """
+    name = "alpaca"
+    BASE = "https://data.alpaca.markets/v2/stocks/bars"
+
+    def __init__(self, config):
+        ds = config["data_source"]
+        self.config = config
+        self.key = ds.get("api_key", "")
+        self.secret = ds.get("api_secret", "")
+        self.feed = ds.get("feed", "iex")
+
+        if not self.key or not self.secret:
+            raise DataFeedError(
+                "Alpaca needs both an api_key and an api_secret.\n"
+                "  Get them free at https://alpaca.markets - no funding needed.\n"
+                "  On a host, set ALPACA_API_KEY and ALPACA_API_SECRET."
+            )
+
+    @staticmethod
+    def to_alpaca(symbol):
+        """Alpaca writes share classes with a dot: BRK-B becomes BRK.B."""
+        return symbol.replace("-", ".")
+
+    def _request(self, params):
+        url = f"{self.BASE}?{urllib.parse.urlencode(params)}"
+        req = urllib.request.Request(url, headers={
+            "APCA-API-KEY-ID": self.key,
+            "APCA-API-SECRET-KEY": self.secret,
+            "accept": "application/json",
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", "replace")[:200]
+            if e.code == 401:
+                raise DataFeedError(
+                    "Alpaca rejected your key. Check api_key and api_secret, "
+                    "and that both came from the same generated pair."
+                )
+            if e.code == 403:
+                raise DataFeedError(
+                    f"Alpaca refused the '{self.feed}' feed for this account.\n"
+                    "  The sip feed needs a paid data plan. If this key is on\n"
+                    "  the free plan, set feed: \"iex\" in config.yaml.\n"
+                    "  Note a paper account does not always carry the same\n"
+                    "  data subscription as the live account it sits under."
+                )
+            if e.code == 429:
+                raise DataFeedError(
+                    "Alpaca rate limit hit. Raise batch_pause_seconds in "
+                    "config.yaml."
+                )
+            raise DataFeedError(f"Alpaca error {e.code}: {body}")
+        except urllib.error.URLError as e:
+            raise DataFeedError(f"Could not reach Alpaca: {e.reason}")
+
+    def _fetch_batch(self, tickers, days_needed):
+        """Fetch one group of symbols, following pagination to the end."""
+        # Markets are open about 21 days a month, so ask for more calendar
+        # days than trading days, plus a margin for holidays.
+        calendar_days = int(days_needed * 1.5) + 14
+        start = (datetime.now() - timedelta(days=calendar_days)).strftime("%Y-%m-%d")
+
+        symbols = [self.to_alpaca(t) for t in tickers]
+        collected = {}
+        page_token = None
+
+        while True:
+            params = {
+                "symbols": ",".join(symbols),
+                "timeframe": "1Day",
+                "start": start,
+                "limit": 10000,
+                "adjustment": "all",      # corrects for splits and dividends
+                "feed": self.feed,
+                "sort": "asc",
+            }
+            if page_token:
+                params["page_token"] = page_token
+
+            payload = self._request(params)
+
+            for symbol, bars in (payload.get("bars") or {}).items():
+                collected.setdefault(symbol, []).extend(bars)
+
+            page_token = payload.get("next_page_token")
+            if not page_token:
+                break
+
+        results = []
+        skipped = []
+
+        for original in tickers:
+            bars = collected.get(self.to_alpaca(original), [])
+            closes = [round(float(b["c"]), 2) for b in bars if b.get("c")]
+
+            if len(closes) < 2:
+                skipped.append(original)
+                continue
+
+            results.append({
+                "ticker": original,
+                "price": closes[-1],
+                "prev_close": closes[-2],
+                "history": closes,
+            })
+
+        return results, skipped
+
+    def fetch(self, tickers, days_needed, progress_cb=None):
+        batch_size = self.config["data_source"].get("batch_size", 100)
+        pause = self.config["data_source"].get("batch_pause_seconds", 1)
+
+        results = []
+        skipped = []
+        batches = [tickers[i:i + batch_size]
+                   for i in range(0, len(tickers), batch_size)]
+
+        for n, batch in enumerate(batches, start=1):
+            note = f"Fetching batch {n} of {len(batches)}"
+            print(f"  {note} ({len(batch)} symbols)...", flush=True)
+            if progress_cb:
+                progress_cb(f"{note} - {len(results)} stocks so far")
+
+            started = time.time()
+            got, missed = self._fetch_batch(batch, days_needed)
+            results.extend(got)
+            skipped.extend(missed)
+            print(f"    got {len(got)}, missed {len(missed)} "
+                  f"in {time.time() - started:.1f}s", flush=True)
+
+            if n < len(batches) and pause:
+                time.sleep(pause)
+
+        if skipped:
+            preview = ", ".join(skipped[:8])
+            more = f" and {len(skipped) - 8} more" if len(skipped) > 8 else ""
+            print(f"  Note: no data for {preview}{more}", flush=True)
+
+        if not results:
+            raise DataFeedError(
+                "Alpaca returned no usable data for any symbol. Check that "
+                "your key is active and your tickers are US-listed."
+            )
+
+        return results
+
+
 PROVIDERS = {
     "mock": MockProvider,
     "yfinance": YFinanceProvider,
+    "alpaca": AlpacaProvider,
 }
 
 

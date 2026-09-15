@@ -30,6 +30,8 @@ class ScreenerState:
         self.last_updated = None
         self.last_error = None
         self.is_refreshing = False
+        self.progress = ""            # what the scan is doing right now
+        self.scan_started = None      # when the current scan began
 
     def snapshot(self):
         """Read the current data safely while the worker may be writing."""
@@ -40,16 +42,24 @@ class ScreenerState:
                 "last_updated": self.last_updated,
                 "last_error": self.last_error,
                 "is_refreshing": self.is_refreshing,
+                "progress": self.progress,
+                "scan_started": self.scan_started,
             }
 
 
-def run_scan(config):
+def run_scan(config, progress_cb=None):
     """One full cycle: fetch -> calculate -> score. Returns (top, total)."""
     provider = get_provider(config)
     days_needed = config["indicators"]["long_ma_days"] + 10
     tickers = universe.resolve(config)
 
-    quotes = provider.fetch(tickers, days_needed)
+    if progress_cb:
+        progress_cb(f"Starting - {len(tickers)} stocks to check")
+
+    quotes = provider.fetch(tickers, days_needed, progress_cb=progress_cb)
+
+    if progress_cb:
+        progress_cb("Calculating scores")
     rows = indicators.compute_all(quotes, config)
     top, all_scored = scoring.rank(rows, config)
     return top, all_scored
@@ -59,9 +69,15 @@ def refresh(state, config):
     """Run a scan and store the outcome, recording any error instead of crashing."""
     with state.lock:
         state.is_refreshing = True
+        state.scan_started = datetime.now()
+        state.progress = "Starting up"
+
+    def note(message):
+        with state.lock:
+            state.progress = message
 
     try:
-        top, all_scored = run_scan(config)
+        top, all_scored = run_scan(config, progress_cb=note)
 
         with state.lock:
             state.rows = top
@@ -85,6 +101,7 @@ def refresh(state, config):
     finally:
         with state.lock:
             state.is_refreshing = False
+            state.progress = ""
 
 
 def start_background_worker(state, config):

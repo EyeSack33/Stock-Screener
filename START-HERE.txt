@@ -92,9 +92,16 @@ Window flashes and closes instantly (Windows)
     Right-click START-WINDOWS.bat, choose Edit, and check the
     file is not empty. Otherwise re-download it.
 
-Page loads but stays empty
-    Look at the window for batch failures. That means Yahoo is
-    limiting you. Lower `limit` in config.yaml to 100.
+Page stuck on "Scanning the market"
+    The page now shows which batch it is on. If the number is
+    not moving, run the connection check:
+
+        python check_data.py       (Mac: python3 check_data.py)
+
+    It tests Yahoo step by step and tells you what is wrong.
+
+    If it is running online instead, add /debug to the end of
+    your web address for the same report in the browser.
 
 "Address already in use"
     Something else is using port 8000. Change `port: 8001`

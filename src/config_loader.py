@@ -31,7 +31,40 @@ def load_config(path=DEFAULT_CONFIG_PATH):
     with open(path, "r") as f:
         config = yaml.safe_load(f)
 
+    # A host like Render supplies secrets as environment variables, which
+    # keeps them out of the files you upload to GitHub.
+    # This must happen BEFORE validation, or a key that only exists in the
+    # environment would be reported as missing.
+    ds = config.setdefault("data_source", {})
+    for env_name, key in [("ALPACA_API_KEY", "api_key"),
+                          ("ALPACA_API_SECRET", "api_secret")]:
+        value = os.environ.get(env_name)
+        if value:
+            ds[key] = value
+
     _validate(config)
+
+    # config.yaml has to be committed for Render to read it, so a key
+    # typed into that file is one accidental push away from being public.
+    # Warn loudly rather than let it pass quietly.
+    if config["data_source"].get("provider") == "alpaca":
+        from_file = not os.environ.get("ALPACA_API_KEY")
+        if from_file and config["data_source"].get("api_key"):
+            print("", flush=True)
+            print("  " + "!" * 56, flush=True)
+            print("  WARNING: your Alpaca key is written in config.yaml.",
+                  flush=True)
+            print("  That file gets committed to GitHub. An Alpaca key can",
+                  flush=True)
+            print("  place trades, not just read prices.", flush=True)
+            print("", flush=True)
+            print("  Fine for testing on your own computer. Before you push,",
+                  flush=True)
+            print("  blank both values and set ALPACA_API_KEY and",
+                  flush=True)
+            print("  ALPACA_API_SECRET in your host instead.", flush=True)
+            print("  " + "!" * 56, flush=True)
+            print("", flush=True)
 
     config["_project_root"] = PROJECT_ROOT
     return config
@@ -92,7 +125,17 @@ def _validate(config):
         raise ConfigError("lookback_days must be at least 1.")
 
     provider = config["data_source"]["provider"].lower()
-    if provider not in ("yfinance", "mock"):
+    if provider not in ("yfinance", "alpaca", "mock"):
         raise ConfigError(
-            f"provider must be 'yfinance' or 'mock', not '{provider}'."
+            f"provider must be 'yfinance', 'alpaca' or 'mock', not '{provider}'."
         )
+
+    if provider == "alpaca":
+        missing = [k for k in ("api_key", "api_secret")
+                   if not config["data_source"].get(k)]
+        if missing:
+            raise ConfigError(
+                f"Alpaca needs {' and '.join(missing)}.\n"
+                "Set them in config.yaml, or as the environment variables\n"
+                "ALPACA_API_KEY and ALPACA_API_SECRET."
+            )

@@ -6,11 +6,23 @@
 # ==========================================================
 
 data_source:
-  # yfinance = free Yahoo data, no key required
+  # alpaca   = free API key, works from hosted servers (use this online)
+  # yfinance = free Yahoo data, no key, but Yahoo BLOCKS hosted servers
+  #            so this only works on your own computer
   # mock     = fake data for testing offline
-  provider: "mock"
-  batch_size: 100            # tickers per request to Yahoo
-  batch_pause_seconds: 1     # brief wait between batches
+  provider: "alpaca"
+
+  # Leave these blank when hosting online - set ALPACA_API_KEY and
+  # ALPACA_API_SECRET in Render instead, so your keys never sit in a file.
+  api_key: ""
+  api_secret: ""
+  # iex = free plan. Prices from one exchange, about 2.5% of volume.
+  # sip = paid plan (Algo Trader Plus). Every exchange combined, which
+  #       is the real consolidated price, and no 15-minute delay.
+  feed: "sip"
+
+  batch_size: 200            # symbols per request
+  batch_pause_seconds: 0     # paid plans allow 10,000 requests a minute
 
 universe:
   # WHICH stocks to scan.
@@ -28,7 +40,7 @@ universe:
 
   file_path: "watchlist.txt"
   exclude: []                # tickers to always ignore
-  limit: 5                   # 0 = scan everything. Lower = faster startup.
+  limit: 0                   # 0 = scan everything. Lower = faster startup.
 
 schedule:
   refresh_minutes: 15        # how often to re-check while the app is awake
