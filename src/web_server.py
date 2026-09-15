@@ -119,6 +119,20 @@ def create_app(state, config):
         say("Batch size", config["data_source"].get("batch_size", 100))
         lines.append("")
 
+        if config["data_source"]["provider"] == "alpaca":
+            from src import alpaca_check
+            lines.append("=" * 54)
+            lines.append("ALPACA KEY DIAGNOSTIC")
+            lines.append("=" * 54)
+            try:
+                lines.extend(alpaca_check.run(
+                    config["data_source"].get("api_key", ""),
+                    config["data_source"].get("api_secret", ""),
+                ))
+            except Exception as e:
+                lines.append(f"Diagnostic itself failed: {e}")
+            lines.append("")
+
         lines.append("-" * 52)
         lines.append("Live test: asking the provider for one stock")
         lines.append("-" * 52)
