@@ -26,6 +26,7 @@ Adding another source means adding one class here and nothing else.
 
 import json
 import random
+import socket
 import time
 import urllib.error
 import urllib.parse
@@ -225,6 +226,13 @@ class AlpacaProvider:
     name = "alpaca"
     BASE = "https://data.alpaca.markets/v2/stocks/bars"
 
+    # Guard rails. Without these a stuck request or a repeating page
+    # token leaves the scan running silently for ever, which shows up as
+    # a page that says "Scanning" and never changes.
+    REQUEST_TIMEOUT = 20      # per request
+    BATCH_DEADLINE = 90       # for all pages of one batch combined
+    MAX_PAGES = 25
+
     def __init__(self, config):
         ds = config["data_source"]
         self.config = config
@@ -251,8 +259,11 @@ class AlpacaProvider:
             "APCA-API-SECRET-KEY": self.secret,
             "accept": "application/json",
         })
+        # urlopen's timeout does not cover DNS lookups, so set the
+        # socket default too or a name resolution stall hangs for ever.
+        socket.setdefaulttimeout(self.REQUEST_TIMEOUT)
         try:
-            with urllib.request.urlopen(req, timeout=30) as response:
+            with urllib.request.urlopen(req, timeout=self.REQUEST_TIMEOUT) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", "replace")[:200]
@@ -276,7 +287,14 @@ class AlpacaProvider:
                 )
             raise DataFeedError(f"Alpaca error {e.code}: {body}")
         except urllib.error.URLError as e:
-            raise DataFeedError(f"Could not reach Alpaca: {e.reason}")
+            raise DataFeedError(
+                f"No response from Alpaca within {self.REQUEST_TIMEOUT}s: "
+                f"{e.reason}"
+            )
+        except socket.timeout:
+            raise DataFeedError(
+                f"Alpaca did not respond within {self.REQUEST_TIMEOUT}s."
+            )
 
     def _fetch_batch(self, tickers, days_needed):
         """Fetch one group of symbols, following pagination to the end."""
@@ -288,8 +306,20 @@ class AlpacaProvider:
         symbols = [self.to_alpaca(t) for t in tickers]
         collected = {}
         page_token = None
+        page = 0
+        deadline = time.time() + self.BATCH_DEADLINE
 
         while True:
+            page += 1
+            if page > self.MAX_PAGES:
+                print(f"    stopping after {self.MAX_PAGES} pages - "
+                      "using what we have", flush=True)
+                break
+            if time.time() > deadline:
+                print(f"    stopping after {self.BATCH_DEADLINE}s - "
+                      "using what we have", flush=True)
+                break
+
             params = {
                 "symbols": ",".join(symbols),
                 "timeframe": "1Day",
@@ -302,14 +332,20 @@ class AlpacaProvider:
             if page_token:
                 params["page_token"] = page_token
 
+            started = time.time()
             payload = self._request(params)
+            returned = sum(len(v) for v in (payload.get("bars") or {}).values())
+            print(f"    page {page}: {returned} bars in "
+                  f"{time.time() - started:.1f}s", flush=True)
 
             for symbol, bars in (payload.get("bars") or {}).items():
                 collected.setdefault(symbol, []).extend(bars)
 
-            page_token = payload.get("next_page_token")
-            if not page_token:
+            new_token = payload.get("next_page_token")
+            # A token identical to the one we just used would loop for ever.
+            if not new_token or new_token == page_token:
                 break
+            page_token = new_token
 
         results = []
         skipped = []
