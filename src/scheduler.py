@@ -49,7 +49,16 @@ class ScreenerState:
 
 def run_scan(config, progress_cb=None):
     """One full cycle: fetch -> calculate -> score. Returns (top, total)."""
+    def step(message):
+        print(f"  {message}", flush=True)
+        if progress_cb:
+            progress_cb(message)
+
+    name = config["data_source"]["provider"]
+    step(f"Loading the {name} provider")
     provider = get_provider(config)
+
+    step("Reading the stock list")
     days_needed = config["indicators"]["long_ma_days"] + 10
     tickers = universe.resolve(config)
 

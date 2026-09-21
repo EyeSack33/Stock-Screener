@@ -133,6 +133,11 @@ def create_app(state, config):
                 lines.append(f"Diagnostic itself failed: {e}")
             lines.append("")
 
+        if config["data_source"]["provider"] == "alpaca":
+            # The diagnostic above already proved whether Alpaca answers.
+            # Fetching again would only risk timing out the page.
+            return Response("\n".join(lines), mimetype="text/plain")
+
         lines.append("-" * 52)
         lines.append("Live test: asking the provider for one stock")
         lines.append("-" * 52)
@@ -189,6 +194,9 @@ def create_app(state, config):
                 int((datetime.now() - snap["scan_started"]).total_seconds())
                 if snap["scan_started"] else None),
             "app_uptime_seconds": int(time.time() - PROCESS_STARTED),
+            "provider": config["data_source"]["provider"],
+            "feed": config["data_source"].get("feed"),
+            "limit": config["universe"].get("limit"),
         })
 
     return app
