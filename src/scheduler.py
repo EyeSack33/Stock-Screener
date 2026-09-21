@@ -120,6 +120,13 @@ def start_background_worker(state, config):
     """
     minutes = config["schedule"]["refresh_minutes"]
 
+    # Apply the IPv4 restriction BEFORE the worker thread exists. Doing it
+    # later, in the web app setup, left a window where the first scan could
+    # start its lookup on IPv6 and hang. See net.py.
+    if config["data_source"].get("force_ipv4", True):
+        from src import net
+        net.force_ipv4()
+
     def loop():
         # Scan immediately so the page is not empty on first load.
         refresh(state, config)
