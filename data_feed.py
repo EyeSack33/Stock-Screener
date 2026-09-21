@@ -33,7 +33,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
 
-from src.net import run_with_deadline, DeadlineExceeded
+from src.net import run_with_deadline, DeadlineExceeded, http_get_isolated
 
 
 class DataFeedError(Exception):
@@ -255,45 +255,39 @@ class AlpacaProvider:
         return symbol.replace("-", ".")
 
     def _request(self, params):
+        """
+        One call to Alpaca, run in a separate process that is killed if it
+        overruns. See net.http_get_isolated for why.
+        """
         url = f"{self.BASE}?{urllib.parse.urlencode(params)}"
-        req = urllib.request.Request(url, headers={
+        status, body = http_get_isolated(url, headers={
             "APCA-API-KEY-ID": self.key,
             "APCA-API-SECRET-KEY": self.secret,
             "accept": "application/json",
-        })
-        try:
-            with urllib.request.urlopen(req, timeout=self.REQUEST_TIMEOUT) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            body = e.read().decode("utf-8", "replace")[:200]
-            if e.code == 401:
-                raise DataFeedError(
-                    "Alpaca rejected your key. Check api_key and api_secret, "
-                    "and that both came from the same generated pair."
-                )
-            if e.code == 403:
-                raise DataFeedError(
-                    f"Alpaca refused the '{self.feed}' feed for this account.\n"
-                    "  The sip feed needs a paid data plan. If this key is on\n"
-                    "  the free plan, set feed: \"iex\" in config.yaml.\n"
-                    "  Note a paper account does not always carry the same\n"
-                    "  data subscription as the live account it sits under."
-                )
-            if e.code == 429:
-                raise DataFeedError(
-                    "Alpaca rate limit hit. Raise batch_pause_seconds in "
-                    "config.yaml."
-                )
-            raise DataFeedError(f"Alpaca error {e.code}: {body}")
-        except urllib.error.URLError as e:
+        }, timeout=self.REQUEST_TIMEOUT)
+
+        if status == 200:
+            try:
+                return json.loads(body)
+            except ValueError:
+                raise DataFeedError("Alpaca sent a response that was not "
+                                    "valid data.")
+        if status is None:
+            raise DataFeedError(f"No answer from Alpaca: {body}")
+        if status == 401:
             raise DataFeedError(
-                f"No response from Alpaca within {self.REQUEST_TIMEOUT}s: "
-                f"{e.reason}"
+                "Alpaca rejected your key (401). The Key ID and Secret do "
+                "not match as a pair. Open /debug for details."
             )
-        except socket.timeout:
+        if status == 403:
             raise DataFeedError(
-                f"Alpaca did not respond within {self.REQUEST_TIMEOUT}s."
+                f"Alpaca refused the '{self.feed}' feed (403). On the free "
+                "plan use feed: \"iex\"."
             )
+        if status == 429:
+            raise DataFeedError("Alpaca rate limit hit (429). Raise "
+                                "batch_pause_seconds in config.yaml.")
+        raise DataFeedError(f"Alpaca error {status}: {' '.join(body.split())[:150]}")
 
     def _fetch_batch(self, tickers, days_needed):
         """Fetch one group of symbols, following pagination to the end."""

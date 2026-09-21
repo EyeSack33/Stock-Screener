@@ -107,6 +107,7 @@ def create_app(state, config):
         import hashlib, inspect, glob as _glob
         lines.append("CODE ON THIS SERVER")
         lines.append("-" * 54)
+        lines.append(f"  Build: {net.BUILD}")
 
         def check(label, test):
             try:
@@ -254,6 +255,7 @@ def create_app(state, config):
                 int((datetime.now() - snap["scan_started"]).total_seconds())
                 if snap["scan_started"] else None),
             "app_uptime_seconds": int(time.time() - PROCESS_STARTED),
+            "build": net.BUILD,
             "provider": config["data_source"]["provider"],
             "feed": config["data_source"].get("feed"),
             "limit": config["universe"].get("limit"),

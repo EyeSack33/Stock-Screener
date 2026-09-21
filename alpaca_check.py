@@ -29,22 +29,14 @@ TIMEOUT_SECONDS = 6
 
 def _call(url, key, secret, params=None):
     """Returns (status_code, body_text). status is None if unreachable."""
+    from src.net import http_get_isolated
     if params:
         url = f"{url}?{urllib.parse.urlencode(params)}"
-    req = urllib.request.Request(url, headers={
+    return http_get_isolated(url, headers={
         "APCA-API-KEY-ID": key,
         "APCA-API-SECRET-KEY": secret,
         "accept": "application/json",
-    })
-    try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as r:
-            return r.status, r.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as e:
-        return e.code, e.read().decode("utf-8", "replace")
-    except urllib.error.URLError as e:
-        return None, f"No response within {TIMEOUT_SECONDS}s: {e.reason}"
-    except Exception as e:
-        return None, f"Request failed: {e}"
+    }, timeout=TIMEOUT_SECONDS)
 
 
 def run(key, secret):
