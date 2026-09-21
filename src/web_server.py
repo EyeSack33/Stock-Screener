@@ -153,13 +153,20 @@ def create_app(state, config):
             lines.append("     place. Delete it there and upload it into src/.")
 
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        strays = [os.path.basename(f) for f in _glob.glob(os.path.join(root, "*.py"))
-                  if os.path.exists(os.path.join(root, "src", os.path.basename(f)))]
-        if strays:
+        top_level_scripts = {"main.py", "serve.py", "wsgi.py", "refresh_sp500.py",
+                             "check_data.py", "check_alpaca.py"}
+        at_top = {os.path.basename(f) for f in _glob.glob(os.path.join(root, "*.py"))}
+        in_src = {os.path.basename(f) for f in _glob.glob(os.path.join(root, "src", "*.py"))}
+        extra_top = sorted(at_top - top_level_scripts)
+        extra_src = sorted(in_src & top_level_scripts)
+        if extra_top or extra_src:
             lines.append("")
-            lines.append(f"  >> Found at the top level but belonging in src/:")
-            lines.append(f"     {', '.join(strays)}")
-
+            lines.append("  Spare copies (harmless - the app ignores them,")
+            lines.append("  tidy up whenever convenient):")
+            if extra_top:
+                lines.append(f"    at the top level, delete: {', '.join(extra_top)}")
+            if extra_src:
+                lines.append(f"    inside src/, delete:      {', '.join(extra_src)}")
         lines.append("")
         lines.append("  File fingerprints:")
         for f in sorted(_glob.glob(os.path.join(root, "src", "*.py"))):
@@ -205,8 +212,33 @@ def create_app(state, config):
             lines.append("")
 
         if config["data_source"]["provider"] == "alpaca":
-            # The diagnostic above already proved whether Alpaca answers.
-            # Fetching again would only risk timing out the page.
+            # Run the exact request the background scan makes, but from
+            # this page. If it works here while the scan hangs, the fault
+            # is the background scan itself, not the key or the network.
+            lines.append("=" * 54)
+            lines.append("THE SCAN'S OWN REQUEST, RUN FROM THIS PAGE")
+            lines.append("=" * 54)
+            try:
+                from src.data_feed import get_provider
+                started = time.time()
+                got = net.run_with_deadline(
+                    40, lambda: get_provider(config).fetch(["AAPL"], 60))
+                took = time.time() - started
+                if got:
+                    lines.append(f"  OK in {took:.1f}s - AAPL {got[0]['price']:.2f}, "
+                                 f"{len(got[0]['history'])} days of history")
+                    lines.append("")
+                    if snap["is_refreshing"] and not snap["last_updated"]:
+                        lines.append("  This request works, yet the background scan")
+                        lines.append("  is stuck. The fault is the background scan,")
+                        lines.append("  not your key or the network. See /threads.")
+                else:
+                    lines.append(f"  Returned nothing after {took:.1f}s")
+            except net.DeadlineExceeded:
+                lines.append("  HUNG - no result in 40s, same as the scan.")
+                lines.append("  So the request itself hangs, wherever it runs.")
+            except Exception as e:
+                lines.append(f"  FAILED - {e}")
             return Response("\n".join(lines), mimetype="text/plain")
 
         lines.append("-" * 52)
@@ -245,6 +277,33 @@ def create_app(state, config):
         """Tests the connection to Alpaca one layer at a time."""
         from flask import Response
         return Response("\n".join(net.probe()), mimetype="text/plain")
+
+    @app.route("/threads")
+    def threads():
+        """
+        Shows the exact line of code every part of the app is on right now.
+        Used to find where a stuck scan is stuck, instead of guessing.
+        Shows file names and line numbers only - never variable values, so
+        no keys or secrets can appear here.
+        """
+        import sys as _sys, threading as _th, traceback as _tb
+        from flask import Response
+        names = {t.ident: t.name for t in _th.enumerate()}
+        out = [f"Build {net.BUILD}   threads: {len(names)}", ""]
+        for ident, frame in _sys._current_frames().items():
+            stack = _tb.extract_stack(frame)
+            ours = [f for f in stack if "/src/" in f.filename
+                    or f.filename.endswith("wsgi.py")]
+            here = stack[-1]
+            out.append("=" * 60)
+            out.append(f"{names.get(ident, 'unknown')}")
+            out.append(f"  now in: {here.name}()  "
+                       f"{here.filename.split('/')[-1]}:{here.lineno}")
+            for f in ours[-6:]:
+                out.append(f"    {f.filename.split('/')[-1]}:{f.lineno}  "
+                           f"{f.name}()  {(f.line or '').strip()[:60]}")
+            out.append("")
+        return Response("\n".join(out), mimetype="text/plain")
 
     @app.route("/healthz")
     def healthz():

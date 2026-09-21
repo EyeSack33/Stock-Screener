@@ -64,6 +64,21 @@ def run(key, secret):
 
     out.append(f"  Key length {len(key)}, secret length {len(secret)}")
 
+    # Invisible characters (zero-width spaces, non-breaking spaces, line
+    # breaks in the middle) survive copy and paste and break the key while
+    # looking completely normal on screen.
+    for label, value in (("Key", key), ("Secret", secret)):
+        odd = [(i, ch) for i, ch in enumerate(value) if not ch.isalnum()]
+        if odd:
+            where = ", ".join(f"position {i + 1} ({repr(ch)[1:-1] or 'blank'})"
+                              for i, ch in odd[:5])
+            out.append(f"  >> {label} contains {len(odd)} character(s) that are")
+            out.append(f"     not letters or digits: {where}")
+            out.append("     Delete the value in Render and type or paste it")
+            out.append("     again, checking nothing extra comes with it.")
+        else:
+            out.append(f"  {label}: letters and digits only - no hidden characters")
+
     if key != key.strip() or secret != secret.strip():
         out.append("  >> STRAY SPACES FOUND. This alone causes a 401.")
         out.append("     Re-paste both values with no leading or")
@@ -93,24 +108,11 @@ def run(key, secret):
         else:
             out.append(f"  {label:<6} {status}")
 
-    if not valid_somewhere and all_timed_out:
-        out.append("")
-        out.append("  VERDICT: no response from Alpaca at all, rather than")
-        out.append("  a rejection. Something is blocking outbound requests")
-        out.append("  from this server, so the key is not the problem.")
-        return out
-
     if not valid_somewhere:
         out.append("")
-        out.append("  VERDICT: the key fails on both trading endpoints, so")
-        out.append("  the credentials themselves are wrong. Market data is")
-        out.append("  not the problem.")
-        out.append("")
-        out.append("  Almost always this means the Key ID and the Secret")
-        out.append("  came from different generated pairs. Generate a fresh")
-        out.append("  pair and copy BOTH from the same screen at the same")
-        out.append("  time, then update both values in Render.")
-        return out
+        out.append("  The trading endpoints refused this key. That does NOT")
+        out.append("  settle it: a key can be limited to market data, and")
+        out.append("  the screener never uses trading. Testing data next.")
     out.append("")
 
     # ---- Does market data work? ----
@@ -146,25 +148,29 @@ def run(key, secret):
     # ---- What to do ----
     out.append("VERDICT")
     out.append("-" * 54)
-    if results.get("iex") == 200:
-        out.append("  Your key works for market data.")
-        out.append("")
-        out.append("  Set  feed: \"iex\"  in config.yaml and commit it.")
-        if results.get("sip") == 200:
-            out.append("  sip works too, so either value is fine.")
-        else:
-            out.append("  sip is not available on this account, which is")
-            out.append("  normal on the free plan.")
-    elif results.get("iex") == 403:
-        out.append("  The key is valid but market data is not enabled on")
-        out.append("  this account. This usually means the account signup")
-        out.append("  was never fully completed - open the Alpaca dashboard")
-        out.append("  and finish any outstanding application steps.")
+    iex, sip = results.get("iex"), results.get("sip")
+    if iex == 200:
+        out.append("  Your key WORKS for market data, which is all the")
+        out.append("  screener needs. Use  feed: \"iex\".")
+        if not valid_somewhere:
+            out.append("")
+            out.append("  (The trading refusals above are irrelevant here -")
+            out.append("   this key is probably limited to data, or trading")
+            out.append("   is not enabled on the account.)")
+    elif iex == 401 and not valid_somewhere:
+        out.append("  Refused everywhere, data included. Alpaca does not")
+        out.append("  accept this key and secret together. Either the")
+        out.append("  secret is incomplete, or the pair was replaced or")
+        out.append("  revoked after it was copied.")
+    elif iex == 403:
+        out.append("  The key is recognised but market data is not enabled")
+        out.append("  for this account. Check the Alpaca dashboard for any")
+        out.append("  unfinished signup or data-agreement steps.")
+    elif iex is None:
+        out.append("  No answer from the data endpoint at all, while the")
+        out.append("  trading endpoints did answer. That points at the")
+        out.append("  data service specifically, not your key.")
     else:
-        out.append("  The key works for trading but not for market data.")
-        out.append("  Nothing in config.yaml will fix that.")
-        out.append("")
-        out.append("  Contact Alpaca support quoting the status codes")
-        out.append("  above, or use a different Alpaca account.")
-
+        out.append(f"  Unexpected result from the data endpoint ({iex}).")
+        out.append("  The detail beside it above is the best clue.")
     return out
