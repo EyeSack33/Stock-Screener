@@ -42,6 +42,21 @@ def local_ip():
         s.close()
 
 
+def _source_label(config):
+    """Plain-English description of where the prices are coming from."""
+    ds = config["data_source"]
+    provider = ds.get("provider", "").lower()
+    if provider == "alpaca":
+        if ds.get("feed", "iex").lower() == "sip":
+            return "Prices from Alpaca, all exchanges combined."
+        return "Prices from Alpaca's IEX feed."
+    if provider == "yfinance":
+        return "Prices from Yahoo, delayed roughly 15 minutes."
+    if provider == "mock":
+        return "SAMPLE DATA - these are not real prices."
+    return f"Prices from {provider}."
+
+
 def _decorate(rows, config):
     """Attach a sparkline SVG to each row before display."""
     days = config.get("web", {}).get("sparkline_days", 30)
@@ -80,6 +95,7 @@ def create_app(state, config):
             # first page view after a gap arrives before the scan finishes.
             # Reload quickly until data appears, then settle down.
             page_refresh=10 if snap["last_updated"] is None else 60,
+            source_label=_source_label(config),
             progress=snap["progress"],
             elapsed=(int((datetime.now() - snap["scan_started"]).total_seconds())
                      if snap["scan_started"] and not snap["last_updated"] else None),
@@ -99,6 +115,57 @@ def create_app(state, config):
 
         def say(label, value):
             lines.append(f"{label:<24} {value}")
+
+        # ---- Which code is actually running? --------------------------
+        # GitHub's web upload can drop a file at the top level instead of
+        # inside src/. The build still succeeds, but the app keeps loading
+        # the old copy. These checks look at what is really loaded.
+        import hashlib, inspect, glob as _glob
+        lines.append("CODE ON THIS SERVER")
+        lines.append("-" * 54)
+        lines.append(f"  Build: {net.BUILD}")
+
+        def check(label, test):
+            try:
+                ok = bool(test())
+            except Exception:
+                ok = False
+            lines.append(f"  {'OK ' if ok else 'OLD'}  {label}")
+            return ok
+
+        from src import data_feed as _df
+        all_current = all([
+            check("data_feed.py has the 90s hard deadline",
+                  lambda: "run_with_deadline" in vars(_df)),
+            check("net.py is present",
+                  lambda: __import__("src.net")),
+            check("scheduler.py forces IPv4 before scanning",
+                  lambda: "force_ipv4" in inspect.getsource(
+                      __import__("src.scheduler", fromlist=["x"]).start_background_worker)),
+            check("alpaca_check.py uses short timeouts",
+                  lambda: __import__("src.alpaca_check", fromlist=["x"]).TIMEOUT_SECONDS <= 10),
+        ])
+        if not all_current:
+            lines.append("")
+            lines.append("  >> A file marked OLD did not reach src/ on GitHub.")
+            lines.append("     Look at the top level of your repository: if")
+            lines.append("     that file is sitting there, it went to the wrong")
+            lines.append("     place. Delete it there and upload it into src/.")
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        strays = [os.path.basename(f) for f in _glob.glob(os.path.join(root, "*.py"))
+                  if os.path.exists(os.path.join(root, "src", os.path.basename(f)))]
+        if strays:
+            lines.append("")
+            lines.append(f"  >> Found at the top level but belonging in src/:")
+            lines.append(f"     {', '.join(strays)}")
+
+        lines.append("")
+        lines.append("  File fingerprints:")
+        for f in sorted(_glob.glob(os.path.join(root, "src", "*.py"))):
+            digest = hashlib.sha1(open(f, "rb").read()).hexdigest()[:8]
+            lines.append(f"    {os.path.basename(f):<20} {digest}")
+        lines.append("")
 
         uptime = int(time.time() - PROCESS_STARTED)
         say("App running for", f"{uptime} seconds")
@@ -204,6 +271,7 @@ def create_app(state, config):
                 int((datetime.now() - snap["scan_started"]).total_seconds())
                 if snap["scan_started"] else None),
             "app_uptime_seconds": int(time.time() - PROCESS_STARTED),
+            "build": net.BUILD,
             "provider": config["data_source"]["provider"],
             "feed": config["data_source"].get("feed"),
             "limit": config["universe"].get("limit"),

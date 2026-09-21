@@ -22,10 +22,20 @@ Why a separate deadline?
   run it in its own thread and stop waiting after a fixed time.
 """
 
+import json
+import os
 import socket
 import ssl
+import subprocess
+import sys
 import threading
 import time
+
+# Bumped whenever this code changes, and shown on /api/data, so you can
+# confirm at a glance which version the server is actually running.
+BUILD = "2026-09-16-isolated"
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 _original_getaddrinfo = socket.getaddrinfo
 _ipv4_forced = False
@@ -75,6 +85,37 @@ def run_with_deadline(seconds, fn, *args, **kwargs):
     if "error" in box:
         raise box["error"]
     return box.get("value")
+
+
+def http_get_isolated(url, headers=None, timeout=20):
+    """
+    Make one web request in a separate process and return
+    (status, body). status is None if nothing came back.
+
+    If the request overruns, the whole process is killed. That works even
+    in cases where timeouts inside the app are ignored, because the stuck
+    code is not in the app at all.
+    """
+    job = json.dumps({"url": url, "headers": headers or {}, "timeout": timeout})
+    try:
+        done = subprocess.run(
+            [sys.executable, "-m", "src.http_worker"],
+            input=job, capture_output=True, text=True,
+            cwd=PROJECT_ROOT,
+            timeout=timeout + 10,      # grace for the program to start
+        )
+    except subprocess.TimeoutExpired:
+        return None, f"no response within {timeout}s (request was stopped)"
+
+    if done.returncode != 0 or not done.stdout.strip():
+        err = (done.stderr or "").strip().splitlines()
+        return None, f"request helper failed: {err[-1] if err else 'no output'}"
+
+    try:
+        result = json.loads(done.stdout)
+        return result.get("status"), result.get("body", "")
+    except ValueError:
+        return None, "request helper returned unreadable output"
 
 
 # ----------------------------------------------------------------------

@@ -22,22 +22,21 @@ PAPER_ACCOUNT_URL = "https://paper-api.alpaca.markets/v2/account"
 LIVE_ACCOUNT_URL = "https://api.alpaca.markets/v2/account"
 
 
+# Kept short on purpose. This runs inside a web request, and four calls
+# at a long timeout would outlast the host's proxy and hang the page.
+TIMEOUT_SECONDS = 6
+
+
 def _call(url, key, secret, params=None):
     """Returns (status_code, body_text). status is None if unreachable."""
+    from src.net import http_get_isolated
     if params:
         url = f"{url}?{urllib.parse.urlencode(params)}"
-    req = urllib.request.Request(url, headers={
+    return http_get_isolated(url, headers={
         "APCA-API-KEY-ID": key,
         "APCA-API-SECRET-KEY": secret,
         "accept": "application/json",
-    })
-    try:
-        with urllib.request.urlopen(req, timeout=25) as r:
-            return r.status, r.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as e:
-        return e.code, e.read().decode("utf-8", "replace")
-    except urllib.error.URLError as e:
-        return None, f"Could not connect: {e.reason}"
+    }, timeout=TIMEOUT_SECONDS)
 
 
 def run(key, secret):
@@ -76,8 +75,11 @@ def run(key, secret):
     out.append("TEST 1 - TRADING ENDPOINTS (is the key valid at all?)")
     out.append("-" * 54)
     valid_somewhere = False
+    all_timed_out = True
     for label, url in [("paper", PAPER_ACCOUNT_URL), ("live", LIVE_ACCOUNT_URL)]:
         status, body = _call(url, key, secret)
+        if status is not None:
+            all_timed_out = False
         if status == 200:
             valid_somewhere = True
             try:
@@ -86,8 +88,17 @@ def run(key, secret):
                            f"{info.get('status', '?')}")
             except Exception:
                 out.append(f"  {label:<6} OK")
+        elif status is None:
+            out.append(f"  {label:<6} no response - {body}")
         else:
             out.append(f"  {label:<6} {status}")
+
+    if not valid_somewhere and all_timed_out:
+        out.append("")
+        out.append("  VERDICT: no response from Alpaca at all, rather than")
+        out.append("  a rejection. Something is blocking outbound requests")
+        out.append("  from this server, so the key is not the problem.")
+        return out
 
     if not valid_somewhere:
         out.append("")
