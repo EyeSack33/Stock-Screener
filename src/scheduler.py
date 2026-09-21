@@ -10,6 +10,7 @@ a quick rate-limit block. Instead, one background worker updates the
 data on schedule, and every page view reads the stored copy.
 """
 
+import os
 import threading
 import time
 import traceback
@@ -32,6 +33,7 @@ class ScreenerState:
         self.is_refreshing = False
         self.progress = ""            # what the scan is doing right now
         self.scan_started = None      # when the current scan began
+        self.worker_pid = None        # which process the scan thread lives in
 
     def snapshot(self):
         """Read the current data safely while the worker may be writing."""
@@ -139,6 +141,55 @@ def start_background_worker(state, config):
             else:
                 print(f"  [{datetime.now():%H:%M:%S}] Market closed - skipping")
 
-    thread = threading.Thread(target=loop, daemon=True)
+    thread = threading.Thread(target=loop, daemon=True, name="scan-loop")
     thread.start()
+    state.worker_pid = os.getpid()
     return thread
+
+
+# ----------------------------------------------------------------------
+#  Making sure the scan runs in the process that serves the page
+# ----------------------------------------------------------------------
+#
+# Some hosts load the app once, start it, and then copy the whole process
+# to handle web requests. A copy gets the scan's status frozen at the
+# moment it was made, but not the scan itself - threads do not survive
+# the copy. The page then shows "Scanning" for ever, because nothing in
+# that copy will ever update it.
+#
+# ensure_worker() runs on every page request. If the scan belongs to a
+# different process, it starts a fresh one here.
+
+_start_lock = threading.Lock()
+
+
+def _reset_after_copy():
+    """Locks copied mid-use stay locked for ever, so make new ones."""
+    global _start_lock
+    _start_lock = threading.Lock()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_after_copy)
+
+
+def ensure_worker(state, config):
+    if state.worker_pid == os.getpid():
+        return                               # already running here
+
+    with _start_lock:
+        if state.worker_pid == os.getpid():
+            return
+
+        print(f"  Scan belongs to process {state.worker_pid}, page served "
+              f"by {os.getpid()} - starting a scan here", flush=True)
+
+        # Everything copied from the other process is stale. Start clean,
+        # including a fresh lock in case the copy caught it mid-use.
+        state.lock = threading.Lock()
+        state.is_refreshing = False
+        state.progress = ""
+        state.scan_started = None
+        state.last_error = None
+
+        start_background_worker(state, config)

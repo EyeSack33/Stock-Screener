@@ -75,6 +75,13 @@ def create_app(state, config):
 
     app = Flask(__name__, template_folder=TEMPLATE_DIR)
 
+    @app.before_request
+    def _scan_in_this_process():
+        # See scheduler.ensure_worker - guards against a host running the
+        # scan in a different process from the one answering this page.
+        from src.scheduler import ensure_worker
+        ensure_worker(state, config)
+
     @app.route("/")
     def index():
         snap = state.snapshot()
@@ -330,6 +337,7 @@ def create_app(state, config):
                 int((datetime.now() - snap["scan_started"]).total_seconds())
                 if snap["scan_started"] else None),
             "app_uptime_seconds": int(time.time() - PROCESS_STARTED),
+            "scan_in_this_process": state.worker_pid == os.getpid(),
             "build": net.BUILD,
             "provider": config["data_source"]["provider"],
             "feed": config["data_source"].get("feed"),
