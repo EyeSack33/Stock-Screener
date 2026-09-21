@@ -1,0 +1,84 @@
+# ==========================================================
+#  DIP SCREENER - CONFIGURATION
+#  This is the only file you need to edit.
+#  Nothing here is secret, but keep it out of public repos
+#  out of habit - the included .gitignore already does that.
+# ==========================================================
+
+data_source:
+  # alpaca   = free API key, works from hosted servers (use this online)
+  # yfinance = free Yahoo data, no key, but Yahoo BLOCKS hosted servers
+  #            so this only works on your own computer
+  # mock     = fake data for testing offline
+  provider: "alpaca"
+
+  # Leave these blank when hosting online - set ALPACA_API_KEY and
+  # ALPACA_API_SECRET in Render instead, so your keys never sit in a file.
+  api_key: ""
+  api_secret: ""
+  # iex = free plan. Prices from one exchange, about 2.5% of volume.
+  # sip = paid plan (Algo Trader Plus). Every exchange combined, which
+  #       is the real consolidated price, and no 15-minute delay.
+  feed: "iex"
+
+  batch_size: 100            # symbols per request
+  batch_pause_seconds: 1     # free plan allows 200 requests a minute
+
+universe:
+  # WHICH stocks to scan.
+  #   sp500 = all ~500 S&P 500 companies
+  #   list  = just the `tickers` below
+  #   file  = one ticker per line in `file_path`
+  source: "sp500"
+
+  tickers:                   # used only when source is "list"
+    - AAPL
+    - MSFT
+    - NVDA
+    - AMZN
+    - GOOGL
+
+  file_path: "watchlist.txt"
+  exclude: []                # tickers to always ignore
+  limit: 100                 # 0 = scan everything. Lower = faster startup.
+
+schedule:
+  refresh_minutes: 15        # how often to re-check while the app is awake
+  market_hours_only: true    # skip nights and weekends
+  timezone: "America/New_York"
+
+indicators:
+  short_ma_days: 20          # short moving average
+  long_ma_days: 50           # long moving average
+  lookback_days: 3           # your short-term window (1-3 days)
+  include_today_in_ma: true  # today's live bar counts toward the averages
+
+scoring:
+  # dip      = falling prices score higher  (your setting)
+  # momentum = rising prices score higher
+  mode: "dip"
+
+  # A move this big earns a perfect sub-score.
+  # 5.0 means "a 5% drop is my ideal dip".
+  dip_full_scale_pct: 5.0
+  ma_distance_full_scale_pct: 5.0
+  ma_trend_full_scale_pct: 5.0
+
+  # These must add up to 1.0. Raise the one you care about most.
+  weights:
+    dip_today: 0.40          # today's drop
+    dip_recent: 0.35         # the drop over lookback_days
+    ma_distance: 0.25        # how far below the 20-day average
+    ma_trend: 0.00           # long-term uptrend filter (off by default)
+
+  buy_threshold: 60          # only show stocks scoring above this (0-100)
+  max_results: 25            # how many to display
+
+output:
+  mode: "console"            # console | csv  (terminal version only)
+  csv_path: "output/signals.csv"
+
+web:
+  host: "0.0.0.0"            # 0.0.0.0 = also reachable from your phone
+  port: 8000                 # change if something else uses this port
+  sparkline_days: 30         # how many days each mini chart covers
