@@ -209,7 +209,7 @@
       <p>{{ progress or "Getting started" }}{% if elapsed %} &middot; {{ elapsed }}s elapsed{% endif %}</p>
       <p class="hint">The page updates itself, so you can leave it open.
         {% if elapsed and elapsed > 150 %}<br><br>
-        This is taking longer than it should. Yahoo may be limiting requests.
+        This is taking longer than it should. The data provider may not be responding.
         Check the log window, then lower <code>limit</code> in config.yaml.
         {% endif %}</p>
     </div>
@@ -217,7 +217,7 @@
 
   <footer>
     {% if last_updated %}<p>{{ rows|length }} of {{ scanned }} stocks passed the filter. Scoring in {{ mode|lower }} mode: bigger drops rank higher.</p>{% endif %}
-    <p>Screening output only, not investment advice. Prices from Yahoo are delayed roughly 15 minutes.</p>
+    <p>Screening output only, not investment advice. {{ source_label }}</p>
   </footer>
 
 </div>
