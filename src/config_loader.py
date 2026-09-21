@@ -42,6 +42,11 @@ def load_config(path=DEFAULT_CONFIG_PATH):
         if value:
             ds[key] = value
 
+    # The Finnhub key lives in the host's environment, same as Alpaca's
+    finnhub = os.environ.get("FINNHUB_API_KEY")
+    if finnhub:
+        config.setdefault("ratings", {})["api_key"] = finnhub
+
     _validate(config)
 
     # config.yaml has to be committed for Render to read it, so a key
@@ -101,9 +106,15 @@ def _validate(config):
     scoring = config["scoring"]
 
     mode = scoring.get("mode", "dip").lower()
-    if mode not in ("dip", "momentum"):
+    if mode not in ("analyst", "dip", "momentum"):
         raise ConfigError(
-            f"scoring mode must be 'dip' or 'momentum', not '{mode}'."
+            f"scoring mode must be 'analyst', 'dip' or 'momentum', not '{mode}'."
+        )
+    if mode == "analyst" and not config.get("ratings", {}).get("api_key"):
+        raise ConfigError(
+            "Analyst mode needs a Finnhub key.\n"
+            "Get one free at https://finnhub.io and set FINNHUB_API_KEY\n"
+            "in Render's Environment tab."
         )
 
     weights = scoring["weights"]

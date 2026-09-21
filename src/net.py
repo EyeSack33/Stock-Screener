@@ -33,7 +33,7 @@ import time
 
 # Bumped whenever this code changes, and shown on /api/data, so you can
 # confirm at a glance which version the server is actually running.
-BUILD = "2026-09-21-sameprocess"
+BUILD = "2026-09-21-analysts"
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

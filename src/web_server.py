@@ -103,6 +103,8 @@ def create_app(state, config):
             # Reload quickly until data appears, then settle down.
             page_refresh=10 if snap["last_updated"] is None else 60,
             source_label=_source_label(config),
+            analyst=config["scoring"].get("mode", "dip").lower() == "analyst",
+            min_drop=config["scoring"].get("min_drop_pct", 2.0),
             progress=snap["progress"],
             elapsed=(int((datetime.now() - snap["scan_started"]).total_seconds())
                      if snap["scan_started"] and not snap["last_updated"] else None),
@@ -219,6 +221,32 @@ def create_app(state, config):
             lines.append("")
 
         if config["data_source"]["provider"] == "alpaca":
+            if config["scoring"].get("mode", "").lower() == "analyst":
+                lines.append("=" * 54)
+                lines.append("FINNHUB ANALYST RATINGS")
+                lines.append("=" * 54)
+                fkey = config.get("ratings", {}).get("api_key", "")
+                lines.append(f"  Key present: {'yes, ' + str(len(fkey)) + ' characters' if fkey else 'NO'}")
+                try:
+                    from src import ratings as _ratings
+                    started = time.time()
+                    r = net.run_with_deadline(
+                        25, _ratings.fetch_one, "AAPL", fkey)
+                    took = time.time() - started
+                    if isinstance(r, dict):
+                        lines.append(f"  OK in {took:.1f}s - AAPL: {r['label']}, "
+                                     f"{r['buy_pct']}% of {r['analysts']} say buy "
+                                     f"(as of {r['period']})")
+                    elif r == "RATE_LIMITED":
+                        lines.append("  Rate limited - wait a minute and reload")
+                    else:
+                        lines.append("  Finnhub answered but has no ratings for AAPL")
+                except net.DeadlineExceeded:
+                    lines.append("  HUNG - no answer from Finnhub in 25s")
+                except Exception as e:
+                    lines.append(f"  FAILED - {e}")
+                lines.append("")
+
             # Run the exact request the background scan makes, but from
             # this page. If it works here while the scan hangs, the fault
             # is the background scan itself, not the key or the network.

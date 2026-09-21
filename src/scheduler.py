@@ -69,9 +69,18 @@ def run_scan(config, progress_cb=None):
 
     quotes = provider.fetch(tickers, days_needed, progress_cb=progress_cb)
 
+    rows = indicators.compute_all(quotes, config)
+
+    if config["scoring"].get("mode", "dip").lower() == "analyst":
+        step("Finding stocks that dropped")
+        dipped = scoring.dip_candidates(rows, config)
+        step(f"{len(dipped)} dropped - fetching analyst ratings")
+        from src import ratings
+        ratings.attach(dipped, config, progress_cb=progress_cb)
+        return scoring.rank_by_analysts(dipped, config), rows
+
     if progress_cb:
         progress_cb("Calculating scores")
-    rows = indicators.compute_all(quotes, config)
     top, all_scored = scoring.rank(rows, config)
     return top, all_scored
 

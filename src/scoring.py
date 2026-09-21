@@ -106,3 +106,45 @@ def rank(rows, config):
     passing = [r for r in scored if r["buy_score"] >= threshold]
     passing.sort(key=lambda r: r["buy_score"], reverse=True)
     return passing[:max_results], scored
+
+
+# ----------------------------------------------------------------------
+#  Analyst mode: stocks that dropped, ranked by Wall Street consensus
+# ----------------------------------------------------------------------
+
+def dip_candidates(rows, config):
+    """
+    Keep only stocks that fell at least min_drop_pct, either today or over
+    the lookback window, whichever drop is bigger. Biggest drop first.
+    """
+    min_drop = config["scoring"].get("min_drop_pct", 2.0)
+    out = []
+    for r in rows:
+        today = -(r.get("daily_change_pct") or 0)
+        recent = -(r.get("recent_change_pct") or 0)
+        drop = max(today, recent)
+        if drop >= min_drop:
+            r = dict(r)
+            r["drop_pct"] = round(drop, 2)
+            out.append(r)
+    out.sort(key=lambda r: r["drop_pct"], reverse=True)
+    return out
+
+
+def rank_by_analysts(rows, config):
+    """
+    Best analyst consensus first. Among equal ratings, the bigger drop
+    wins. Stocks no analyst covers go to the bottom.
+    """
+    for r in rows:
+        rating = r.get("rating")
+        r["signal"] = rating["label"] if rating else "No coverage"
+
+    def order(r):
+        rating = r.get("rating")
+        return (1 if rating else 0,
+                rating["consensus"] if rating else 0,
+                r.get("drop_pct", 0))
+
+    ranked = sorted(rows, key=order, reverse=True)
+    return ranked[:config["scoring"]["max_results"]]
