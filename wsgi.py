@@ -25,7 +25,7 @@ except AttributeError:
     pass
 
 from src.config_loader import load_config
-from src.scheduler import ScreenerState, start_background_worker
+from src.scheduler import ScreenerState
 from src.web_server import create_app
 
 config = load_config()
@@ -37,6 +37,11 @@ print(f"  provider : {config['data_source']['provider']}", flush=True)
 print(f"  limit    : {config['universe'].get('limit', 0) or 'all'}", flush=True)
 print("=" * 52, flush=True)
 
-start_background_worker(state, config)
+# The scan is NOT started here. Some hosts load this file once and then
+# copy the process to serve pages; a scan started here would run in the
+# original, invisible to the page, and waste API calls. Instead the first
+# page request starts it, in the process that will actually use it
+# (see scheduler.ensure_worker). Render's health check makes that first
+# request within seconds of startup.
 
 app = create_app(state, config)

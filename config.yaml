@@ -54,9 +54,18 @@ indicators:
   include_today_in_ma: true  # today's live bar counts toward the averages
 
 scoring:
-  # dip      = falling prices score higher  (your setting)
-  # momentum = rising prices score higher
-  mode: "dip"
+  # analyst  = stocks that dropped, ranked by Wall Street analyst ratings
+  #            (your setting - needs a free Finnhub key, see ratings below)
+  # dip      = the original formula score, falling prices score higher
+  # momentum = the original formula score, rising prices score higher
+  mode: "analyst"
+
+  # ANALYST MODE: a stock must be down at least this much, either today
+  # or over lookback_days, to appear on the page.
+  min_drop_pct: 2.0
+  max_results: 25            # how many to display
+
+  # ---- Everything below is only used by the dip and momentum modes ----
 
   # A move this big earns a perfect sub-score.
   # 5.0 means "a 5% drop is my ideal dip".
@@ -72,7 +81,15 @@ scoring:
     ma_trend: 0.00           # long-term uptrend filter (off by default)
 
   buy_threshold: 60          # only show stocks scoring above this (0-100)
-  max_results: 25            # how many to display
+
+ratings:
+  # Analyst ratings from Finnhub's free plan.
+  # Leave api_key blank - set FINNHUB_API_KEY in Render instead.
+  provider: "finnhub"
+  api_key: ""
+  cache_hours: 24            # ratings change monthly, so re-check daily
+  pause_seconds: 1.1         # free plan allows 60 lookups a minute
+  max_lookups: 40            # cap per scan; the rest fill in next scan
 
 output:
   mode: "console"            # console | csv  (terminal version only)

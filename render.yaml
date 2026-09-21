@@ -30,3 +30,5 @@ services:
         sync: false
       - key: ALPACA_API_SECRET
         sync: false
+      - key: FINNHUB_API_KEY
+        sync: false
