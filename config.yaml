@@ -22,7 +22,7 @@ data_source:
   feed: "iex"
 
   batch_size: 100            # symbols per request
-  batch_pause_seconds: 1     # paid plans allow 10,000 requests a minute
+  batch_pause_seconds: 1     # free plan allows 200 requests a minute
 
 universe:
   # WHICH stocks to scan.
