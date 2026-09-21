@@ -42,6 +42,21 @@ def local_ip():
         s.close()
 
 
+def _source_label(config):
+    """Plain-English description of where the prices are coming from."""
+    ds = config["data_source"]
+    provider = ds.get("provider", "").lower()
+    if provider == "alpaca":
+        if ds.get("feed", "iex").lower() == "sip":
+            return "Prices from Alpaca, all exchanges combined."
+        return "Prices from Alpaca's IEX feed."
+    if provider == "yfinance":
+        return "Prices from Yahoo, delayed roughly 15 minutes."
+    if provider == "mock":
+        return "SAMPLE DATA - these are not real prices."
+    return f"Prices from {provider}."
+
+
 def _decorate(rows, config):
     """Attach a sparkline SVG to each row before display."""
     days = config.get("web", {}).get("sparkline_days", 30)
@@ -80,6 +95,7 @@ def create_app(state, config):
             # first page view after a gap arrives before the scan finishes.
             # Reload quickly until data appears, then settle down.
             page_refresh=10 if snap["last_updated"] is None else 60,
+            source_label=_source_label(config),
             progress=snap["progress"],
             elapsed=(int((datetime.now() - snap["scan_started"]).total_seconds())
                      if snap["scan_started"] and not snap["last_updated"] else None),
