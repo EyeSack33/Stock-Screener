@@ -33,6 +33,8 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
 
+from src.net import run_with_deadline, DeadlineExceeded
+
 
 class DataFeedError(Exception):
     pass
@@ -259,9 +261,6 @@ class AlpacaProvider:
             "APCA-API-SECRET-KEY": self.secret,
             "accept": "application/json",
         })
-        # urlopen's timeout does not cover DNS lookups, so set the
-        # socket default too or a name resolution stall hangs for ever.
-        socket.setdefaulttimeout(self.REQUEST_TIMEOUT)
         try:
             with urllib.request.urlopen(req, timeout=self.REQUEST_TIMEOUT) as response:
                 return json.loads(response.read().decode("utf-8"))
@@ -383,7 +382,17 @@ class AlpacaProvider:
                 progress_cb(f"{note} - {len(results)} stocks so far")
 
             started = time.time()
-            got, missed = self._fetch_batch(batch, days_needed)
+            try:
+                # A hard limit that holds even if the request is stuck in
+                # a DNS lookup, which no socket timeout can interrupt.
+                got, missed = run_with_deadline(
+                    self.BATCH_DEADLINE, self._fetch_batch, batch, days_needed)
+            except DeadlineExceeded:
+                raise DataFeedError(
+                    f"Alpaca did not answer within {self.BATCH_DEADLINE}s. "
+                    "The server's network may be the problem rather than "
+                    "your key - open /net on this site to check."
+                )
             results.extend(got)
             skipped.extend(missed)
             print(f"    got {len(got)}, missed {len(missed)} "

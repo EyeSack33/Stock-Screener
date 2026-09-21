@@ -20,7 +20,7 @@ PROCESS_STARTED = time.time()
 
 from flask import Flask, render_template, jsonify
 
-from src import sparkline, market_hours
+from src import sparkline, market_hours, net
 
 TEMPLATE_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates"
@@ -54,6 +54,10 @@ def _decorate(rows, config):
 
 
 def create_app(state, config):
+    # Must run before any outbound request. See net.py for why.
+    if config["data_source"].get("force_ipv4", True):
+        net.force_ipv4()
+
     app = Flask(__name__, template_folder=TEMPLATE_DIR)
 
     @app.route("/")
@@ -168,6 +172,12 @@ def create_app(state, config):
                 lines.append("alpaca provider - see DEPLOY.md.")
 
         return Response("\n".join(lines), mimetype="text/plain")
+
+    @app.route("/net")
+    def network_check():
+        """Tests the connection to Alpaca one layer at a time."""
+        from flask import Response
+        return Response("\n".join(net.probe()), mimetype="text/plain")
 
     @app.route("/healthz")
     def healthz():
