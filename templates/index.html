@@ -122,6 +122,26 @@
     text-align: right;
   }
 
+  .analysts { grid-column: 1 / -1; margin-top: .45rem; }
+  .split {
+    display: flex; height: 6px; overflow: hidden;
+    border-radius: 1px; background: var(--rule);
+  }
+  .seg { height: 100%; }
+  .seg + .seg { border-left: 1px solid var(--paper); }
+  .seg.sb { background: #157f4a; }
+  .seg.b  { background: #74b491; }
+  .seg.h  { background: #bfc6c1; }
+  .seg.s  { background: #e2a098; }
+  .seg.ss { background: #c0392f; }
+  .verdict {
+    margin: .35rem 0 0; font-size: .82rem; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .verdict b { color: var(--ink); font-weight: 600; margin-right: .35rem; }
+  .row.top .verdict { font-size: .9rem; }
+  .verdict.quiet { font-style: italic; }
+
   .empty, .error {
     padding: 2.2rem 0;
     border-bottom: 1px solid var(--rule);
@@ -191,17 +211,42 @@
         </span>
       </div>
 
+      {% if analyst %}
+      <div class="analysts">
+        {% if r.rating %}
+        {% set a = r.rating %}
+        <div class="split" role="img"
+             aria-label="{{ a.strong_buy }} strong buy, {{ a.buy }} buy, {{ a.hold }} hold, {{ a.sell }} sell, {{ a.strong_sell }} strong sell">
+          {% for count, cls in [(a.strong_buy, 'sb'), (a.buy, 'b'), (a.hold, 'h'), (a.sell, 's'), (a.strong_sell, 'ss')] %}
+            {% if count %}<span class="seg {{ cls }}" style="width: {{ (count / a.analysts * 100)|round(2) }}%"></span>{% endif %}
+          {% endfor %}
+        </div>
+        <p class="verdict"><b>{{ a.label }}</b> {{ a.buy_pct }}% of {{ a.analysts }} analyst{{ 's' if a.analysts != 1 }} say buy</p>
+        {% elif r.rating_pending %}
+        <p class="verdict quiet">Analyst rating arrives with the next scan</p>
+        {% else %}
+        <p class="verdict quiet">No analyst coverage</p>
+        {% endif %}
+      </div>
+      {% else %}
       <div class="score">
         <div class="track"><div class="fill" style="width: {{ r.buy_score }}%"></div></div>
         <span class="num">{{ "%.1f"|format(r.buy_score) }} {{ r.signal|lower }}</span>
       </div>
+      {% endif %}
     </div>
     {% endfor %}
   {% elif last_updated %}
     <div class="empty">
+      {% if analyst %}
+      <h2>No stock fell {{ min_drop }}% or more</h2>
+      <p>{{ scanned }} stocks checked. Lower min_drop_pct in config.yaml to
+         widen the net.</p>
+      {% else %}
       <h2>Nothing scored above {{ threshold }} today</h2>
       <p>{{ scanned }} stocks checked and none had fallen far enough. Lower
          buy_threshold in config.yaml to widen the net.</p>
+      {% endif %}
     </div>
   {% elif not last_error %}
     <div class="empty">
@@ -216,7 +261,12 @@
   {% endif %}
 
   <footer>
-    {% if last_updated %}<p>{{ rows|length }} of {{ scanned }} stocks passed the filter. Scoring in {{ mode|lower }} mode: bigger drops rank higher.</p>{% endif %}
+    {% if analyst %}
+      {% if last_updated %}<p>Showing {{ rows|length }} of the {{ scanned }} stocks checked that fell {{ min_drop }}% or more, best analyst consensus first.</p>{% endif %}
+      <p>Analyst ratings from Finnhub. They are a monthly snapshot, so they may not reflect news behind today's drop, and consensus ratings lean positive.</p>
+    {% elif last_updated %}
+      <p>{{ rows|length }} of {{ scanned }} stocks passed the filter. Scoring in {{ mode|lower }} mode: bigger drops rank higher.</p>
+    {% endif %}
     <p>Screening output only, not investment advice. {{ source_label }}</p>
   </footer>
 
